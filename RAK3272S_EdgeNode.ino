@@ -5,9 +5,10 @@
 //   Pico 3V3(OUT)         -> RAK3272S VDD
 //   Pico GND              -> RAK3272S GND
 //
-// OTAA join on boot (Class C, unconfirmed uplinks), then one dummy uplink
-// every UPLINK_INTERVAL_MS. Serial Monitor (USB, 115200) also stays live for
-// manual AT commands.
+// OTAA join on boot (Class C, unconfirmed uplinks), then one uplink every
+// UPLINK_INTERVAL_MS carrying real MCU core temperature plus two clearly-
+// labeled dummy values (see sendSensorUplink() below for the payload layout).
+// Serial Monitor (USB, 115200) also stays live for manual AT commands.
 
 #define RAK3272_RST 2
 
@@ -148,11 +149,34 @@ bool doOtaaJoin(unsigned long timeoutMs = 30000) {
   return joinedOk;
 }
 
-// Send one dummy uplink (an incrementing counter byte, as hex) on UPLINK_PORT.
-void sendDummyUplink() {
-  char hex[3];
-  snprintf(hex, sizeof(hex), "%02X", dummyCounter);
-  sendAT(String("AT+SEND=") + UPLINK_PORT + ":" + hex, 3000);
+// Payload layout (5 bytes, big-endian), matching the device profile's decodeUplink():
+//   [0..1] int16  mcu_temp_c_x100      -- REAL: RP2040 internal core temperature * 100
+//   [2..3] int16  dummy_humidity_x100  -- DUMMY: simulated, sine wave so it visibly moves
+//   [4]    uint8  dummy_counter        -- DUMMY: increments every send, wraps at 256
+//
+// mcu_temp_c is the chip's own die temperature (idles well above room temp), not an
+// ambient/environmental reading -- named accordingly so it's never mistaken for one.
+String toHex16(int16_t v) {
+  char buf[5];
+  snprintf(buf, sizeof(buf), "%04X", (uint16_t)v);
+  return String(buf);
+}
+
+void sendSensorUplink() {
+  float mcuTempC = analogReadTemp();
+  float dummyHumidity = 50.0f + 15.0f * sinf(dummyCounter * 0.3f);
+
+  int16_t tempScaled = (int16_t)lroundf(mcuTempC * 100);
+  int16_t humScaled = (int16_t)lroundf(dummyHumidity * 100);
+
+  char counterHex[3];
+  snprintf(counterHex, sizeof(counterHex), "%02X", dummyCounter);
+  String payload = toHex16(tempScaled) + toHex16(humScaled) + counterHex;
+
+  Serial.printf("mcu_temp_c=%.2f  dummy_humidity=%.2f  dummy_counter=%u\n",
+                mcuTempC, dummyHumidity, dummyCounter);
+
+  sendAT(String("AT+SEND=") + UPLINK_PORT + ":" + payload, 3000);
   dummyCounter++;
 }
 
@@ -199,8 +223,8 @@ void setup() {
   digitalWrite(LED_BUILTIN, joined ? HIGH : LOW);
 
   if (joined) {
-    Serial.println("Sending first dummy uplink, then every 5 minutes.");
-    sendDummyUplink();
+    Serial.println("Sending first sensor uplink, then every 5 minutes.");
+    sendSensorUplink();
     lastUplinkMs = millis();
   } else {
     Serial.println("Join failed -- not sending uplinks. You can still type AT commands manually below.");
@@ -209,7 +233,7 @@ void setup() {
 
 void loop() {
   if (joined && millis() - lastUplinkMs >= UPLINK_INTERVAL_MS) {
-    sendDummyUplink();
+    sendSensorUplink();
     lastUplinkMs = millis();
   }
 
