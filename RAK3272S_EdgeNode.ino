@@ -5,8 +5,9 @@
 //   Pico 3V3(OUT)         -> RAK3272S VDD
 //   Pico GND              -> RAK3272S GND
 //
-// OTAA join on boot, then one dummy uplink every UPLINK_INTERVAL_MS.
-// Serial Monitor (USB, 115200) also stays live for manual AT commands.
+// OTAA join on boot (Class C, unconfirmed uplinks), then one dummy uplink
+// every UPLINK_INTERVAL_MS. Serial Monitor (USB, 115200) also stays live for
+// manual AT commands.
 
 #define RAK3272_RST 2
 
@@ -74,15 +75,39 @@ String sendAT(String cmd, unsigned long timeoutMs = 2000) {
 // way. RUI3 persists config to flash, so re-setting unchanged values on every boot
 // just wastes flash writes (and AT+NWM can force a reboot even when unchanged).
 // Returns true if a set command was actually sent (i.e. the value changed).
+//
+// The module echoes the query itself (e.g. "AT+CLASS=?") before answering with the
+// real value line (e.g. "AT+CLASS=A"). A plain substring search for the expected
+// value anywhere in that response is unsound -- e.g. expected="C" would falsely
+// match the "C" inside the echoed "AT+CLASS=?"/"AT+CLASS" text. Instead, anchor on
+// the LAST "AT+<name>=" occurrence (the real value line, since it comes after the
+// echoed query) and compare only the token that follows it.
 bool ensureSetting(const char* name, const String& expected, unsigned long timeoutMs = 2000) {
   String resp = sendAT(String("AT+") + name + "=?", timeoutMs);
 
+  String marker = String("AT+") + name + "=";
   String respUpper = resp;
   respUpper.toUpperCase();
+  String markerUpper = marker;
+  markerUpper.toUpperCase();
+
+  String currentValue = "";
+  int idx = respUpper.lastIndexOf(markerUpper);
+  if (idx != -1) {
+    int valueStart = idx + markerUpper.length();
+    int lineEnd = resp.indexOf('\r', valueStart);
+    if (lineEnd == -1) lineEnd = resp.indexOf('\n', valueStart);
+    if (lineEnd == -1) lineEnd = resp.length();
+    currentValue = resp.substring(valueStart, lineEnd);
+    currentValue.trim();
+  }
+
   String expUpper = expected;
   expUpper.toUpperCase();
+  String currentValueUpper = currentValue;
+  currentValueUpper.toUpperCase();
 
-  if (respUpper.indexOf(expUpper) != -1) {
+  if (currentValueUpper == expUpper) {
     Serial.println("   (already " + expected + ", skipping set)");
     return false;
   }
@@ -164,7 +189,7 @@ void setup() {
 
   ensureSetting("NJM", "1");                     // OTAA
   ensureSetting("BAND", LORA_BAND);               // IN865
-  ensureSetting("CLASS", "A");
+  ensureSetting("CLASS", "C");                   // production target: always-listening RX2
   ensureSetting("CFM", "0");                     // unconfirmed uplinks
   ensureSetting("APPEUI", OTAA_APPEUI);
   ensureSetting("APPKEY", OTAA_APPKEY);
