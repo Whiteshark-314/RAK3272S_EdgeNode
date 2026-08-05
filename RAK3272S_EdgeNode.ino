@@ -11,11 +11,11 @@
 
 #define RAK3272_RST 2
 
-// ---- OTAA credentials / region (RAK3272S / RUI3 AT command set) ----
+// OTAA_APPEUI / OTAA_APPKEY live in secrets.h, which is gitignored -- copy
+// secrets.h.example to secrets.h and fill in your device's real credentials.
 // DevEUI: left as the module's factory-programmed EUI (not set here).
-// This network server requires AppEUI == DevEUI; DevEUI for this device is ac1f09fffe1141b6.
-#define OTAA_APPEUI   "AC1F09FFFE1141B6"
-#define OTAA_APPKEY   "3f262a6c8cd62a4b5214b2650943c67b"
+// This network server requires AppEUI == DevEUI.
+#include "secrets.h"
 #define LORA_BAND     "3"   // 3 = IN865
 
 #define UPLINK_PORT        2

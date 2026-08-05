@@ -5,4 +5,5 @@ build/
 *.map
 .vscode/
 .claude/
+secrets.h
 
